@@ -1,5 +1,6 @@
 extern crate dxf;
 extern crate svg;
+extern crate libm;
 use std::env::{args, Args};
 use svg::Document;
 use svg::node::element::Path;
@@ -111,7 +112,7 @@ fn ex(_dxf_file: &mut Drawing, table: &mut Vec<Object>, table_arc: &mut Vec<Arc>
             },
             EntityType::Arc(ref arc) => {
                 println!("Found arc");
-                println!("{:?}", arc.center.x);
+                //println!("{:?}", arc.center.x);
                 _arc.layer_name = _layer_name.to_string();
                 _arc.x = arc.center.x;
                 _arc.y = arc.center.y;
@@ -160,6 +161,8 @@ fn svg(table: &mut Vec<Object>, table_arcs: &mut Vec<Arc>) {
         }
     }
 
+    println!("{:?}", min_y_rotation);
+
     for entites in table.iter() {
         let range = entites.vecx.len();
         if range != 0 {
@@ -196,12 +199,45 @@ fn svg(table: &mut Vec<Object>, table_arcs: &mut Vec<Arc>) {
 
     for entites in table_arcs.iter() {
         if table_arcs_length != 0 {
-            println!("Drawing arc");
             let mut data = Data::new();
-            let difference = entites.y + entites.r - min_y_rotation;
-            data = data.move_to((entites.x, entites.y + entites.r - difference));
+            let mut quadrant = 1;
+            let difference = entites.y - min_y_rotation;
+            let mut first_point_x = 0.0;
+            let mut first_point_y = 0.0;
+            let mut second_point_x = 0.0;
+            let mut second_point_y = 0.0;
+            let mut third_point_x = 0.0;
+            let mut third_point_y = 0.0;
+            let center_x = entites.x;
+            let center_y = entites.y;
+            let radius = entites.r;
+            let mut middle_angle = (entites.end_angle + entites.start_angle) / 2.0;
+            if entites.end_angle == 0.0 {
+                middle_angle = (360.0 + entites.start_angle) / 2.0;
+            }
+            else if entites.end_angle < 90.0 && entites.end_angle > 0.0 && entites.start_angle > 270.0 && entites.start_angle < 359.9 {
+                let angle = (360.0 - entites.start_angle + entites.end_angle) / 2.0;
+                middle_angle = entites.end_angle - angle ;
+            }
+            polar_to_cartesian(center_x, center_y, radius, entites.start_angle, &mut first_point_x, &mut first_point_y);
+            polar_to_cartesian(center_x, center_y, radius, entites.end_angle, &mut second_point_x, &mut second_point_y);
+            polar_to_cartesian(center_x, center_y, 1.15 * radius, middle_angle, &mut third_point_x, &mut third_point_y);
+            //check_quarter(entites.start_angle, entites.end_angle, &mut quadrant);
+            //calculate_points_of_arc(quadrant, center_x, center_y, &mut first_point_x, &mut first_point_y, &mut second_point_x, &mut second_point_y, &mut third_point_x, &mut third_point_y, radius);
+            println!("{:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?}", center_x, center_y, first_point_x, first_point_y, second_point_x, second_point_y, third_point_x, third_point_y);
+            println!("{:?}, {:?}, {:?}", middle_angle, entites.start_angle, entites.end_angle);
+
+            let diff_1 = first_point_y - min_y_rotation;
+            let diff_2 = second_point_y - min_y_rotation;
+            let diff_3 = third_point_y - min_y_rotation;
+
+            //data = data.move_to((entites.x, entites.y + entites.r - difference));
+            //beginning of the arc
+            data = data.move_to((second_point_x, second_point_y - 2.0 * diff_2));
             //data = data.quadratic_curve_to((entites.x - entites.r, entites.y - difference, 50, 50));
-            data = data.quadratic_curve_to((entites.x - entites.r, entites.y + entites.r - difference, entites.x - entites.r, entites.y - difference));
+            //(beginning point of the curve, ending point of the curve, )
+            //data = data.quadratic_curve_to((entites.x - entites.r, entites.y + entites.r - difference, entites.x - entites.r, entites.y - difference));
+            data = data.quadratic_curve_to((third_point_x, third_point_y - 2.0 * diff_3, first_point_x, first_point_y - 2.0 * diff_1));
             print!("{:?}", data);
             data_vec.push(data);
         }
@@ -212,7 +248,7 @@ fn svg(table: &mut Vec<Object>, table_arcs: &mut Vec<Arc>) {
         let path = Path::new()
             .set("fill", "none")
             .set("stroke", "black")
-            .set("stroke-width", 0.5)
+            .set("stroke-width", 0.01)
             .set("d", v);
         paths_vec.push(path);
     }
@@ -233,13 +269,70 @@ fn svg(table: &mut Vec<Object>, table_arcs: &mut Vec<Arc>) {
 
     //adding paths to document
     let mut document = Document::new()
-        .set("viewBox", (min_value_x - 0.1 * length, min_value_y - height - 0.1 * height , 1.2 * length, 1.2 * height));
+        //.set("viewBox", (min_value_x - 0.1 * length, min_value_y - height - 0.1 * height , 1.2 * length, 1.2 * height));
+        .set("viewBox", (min_value_x - 0.1 * length, min_value_y - 0.1 * height , 2.0 * 1.2 * length, 2.0 * 1.2 * height));
     for p in paths_vec {
         document = document.add(p);
     }
 
 //using previously created document to create actual svg file
 svg::save("image.svg", &document).unwrap();
+}
+
+fn polar_to_cartesian(_center_x: f64, _center_y: f64, _radius: f64, _angle: f64, _x: &mut f64, _y: &mut f64) {
+    let angle_in_radians = _angle * std::f64::consts::PI / 180.0;
+    *_x = _center_x + _radius * libm::cos(angle_in_radians);
+    *_y = _center_y + _radius * libm::sin(angle_in_radians);
+}
+
+fn calculate_points_of_arc(quadrant: i64, _center_x: f64, _center_y: f64, _first_point_x: &mut f64, _first_point_y: &mut f64, _second_point_x: &mut f64, _second_point_y: &mut f64, _third_point_x: &mut f64, _third_point_y: &mut f64, _radius: f64) {
+    if quadrant == 1 {
+        *_first_point_x = _center_x + _radius;
+        *_first_point_y = _center_y;
+
+        *_second_point_x = _center_x;
+        *_second_point_y = _center_y + _radius;
+
+        *_third_point_x = _center_x + _radius;
+        *_third_point_y = _center_y + _radius;
+    }
+    else if quadrant == 2 {
+        *_first_point_x = _center_x;
+        *_first_point_y = _center_y + _radius;
+
+        *_second_point_x = _center_x - _radius;
+        *_second_point_y = _center_y;
+
+        *_third_point_x = _center_x - _radius;
+        *_third_point_y = _center_y + _radius;
+    }
+    else if quadrant == 3 {
+        *_first_point_x = _center_x - _radius;
+        *_first_point_y = _center_y;
+
+        *_second_point_x = _center_x;
+        *_second_point_y = _center_y - _radius;
+
+        *_third_point_x = _center_x - _radius;
+        *_third_point_y = _center_y - _radius;
+    }
+    else if quadrant == 4 {
+        *_first_point_x = _center_x;
+        *_first_point_y = _center_y - _radius;
+
+        *_second_point_x = _center_x + _radius;
+        *_second_point_y = _center_y;
+
+        *_third_point_x = _center_x + _radius;
+        *_third_point_y = _center_y - _radius;
+    }
+}
+
+fn check_quarter(_start_angle: f64, _end_angle: f64, _quadrant: &mut i64) {
+    if _start_angle == 0.0 && _end_angle == 90.0 {*_quadrant = 1;}
+    else if _start_angle == 90.0 && _end_angle == 180.0 {*_quadrant = 2;}
+    else if _start_angle == 180.0 && _end_angle == 270.0 {*_quadrant = 3;}
+    else if _start_angle == 270.0 && _end_angle == 0.0 {*_quadrant = 4;}
 }
 
 fn calculate_dimensions(_max_x: f64, _min_x: f64, _max_y: f64, _min_y: f64, _length: &mut f64, _height: &mut f64) {
